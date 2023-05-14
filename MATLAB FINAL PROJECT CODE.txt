@@ -1,0 +1,286 @@
+%% Created By Ahmed Saman ,Rawa Rashed
+
+clc
+clear
+%% OFDM simulation with QAM modulation
+
+%% Parameters
+N = 1024;               % Number of subcarriers
+K = 600;                % Number of data subcarriers
+P = N-K;                % Number of pilot subcarriers
+M = 16;                 % Modulation order (QAM)
+M2 = 4;                 % Modulation order (QPSK)
+M3= 2;                 % Modulation order (BPSK)
+SNRdB = 20;             % Signal-to-Noise Ratio (dB)
+numSymbols = 100;       % Number of OFDM symbols to transmit
+
+%% Transmitter
+% Generate random data symbols
+data = randi([0 M-1], K, numSymbols);
+data2 = randi([0 M2-1], K, numSymbols);
+data3 = randi([0 M3-1], K, numSymbols);
+%% Modulate data symbols using QAM
+qamData = qammod(data, M);
+QPSKData = qammod(data2, M2);
+BPSKData = qammod(data3, M3);
+
+
+%% Generate pilot symbols
+pilot = ones(P, numSymbols);
+
+%% Combine data and pilot symbols
+txData = [pilot; qamData];
+txQPSKData = [pilot; QPSKData];
+txBPSKData = [pilot; BPSKData];
+
+%% Perform IFFT on each subcarrier
+txTime = ifft(txData);
+txQPSKTime = ifft(txQPSKData);
+txBPSKTime = ifft(txBPSKData);
+
+%% Add cyclic prefix to prevent ISI
+CP = 32;        % Cyclic prefix length
+txCyclic = [txTime(N-CP+1:N, :); txTime];
+txQPSKCyclic = [txQPSKTime(N-CP+1:N, :); txQPSKTime];
+txBPSKCyclic = [txBPSKTime(N-CP+1:N, :); txBPSKTime];
+
+%% Convert to serial stream
+txSerial = txCyclic(:);
+txQPSKSerial = txQPSKCyclic(:);
+txBPSKSerial = txBPSKCyclic(:);
+
+%% Channel
+%% Generate AWGN noise
+SNR = 10^(SNRdB/10);
+noisePower = 1/SNR;
+noise = sqrt(noisePower/2) * (randn(size(txSerial)) + 1j*randn(size(txSerial)));
+noiseQPSK = sqrt(noisePower/2) * (randn(size(txQPSKSerial)) + 1j*randn(size(txQPSKSerial)));
+noiseBPSK = sqrt(noisePower/2) * (randn(size(txBPSKSerial)) + 1j*randn(size(txBPSKSerial)));
+%% Generate a random Rayleigh fading channel
+channel = sqrt(0.5)*(randn(1,N+CP)+1j*randn(1,N+CP));
+%% Apply the channel to the transmitted signal
+rxSerial = conv(channel, txSerial);
+rxSerial = rxSerial + sqrt(noisePower/2)*(randn(size(rxSerial)) + 1j*randn(size(rxSerial)));
+
+rxQPSKSerial = conv(channel, txQPSKSerial);
+rxQPSKSerial = rxQPSKSerial + sqrt(noisePower/2)*(randn(size(rxQPSKSerial)) + 1j*randn(size(rxQPSKSerial)));
+
+rxBPSKSerial = conv(channel, txBPSKSerial);
+rxBPSKSerial = rxQPSKSerial + sqrt(noisePower/2)*(randn(size(rxBPSKSerial)) + 1j*randn(size(rxBPSKSerial)));
+
+%% Add noise to signal
+rxSerial = txSerial + noise;
+rxQPSKSerial = txQPSKSerial + noiseQPSK;
+rxBPSKSerial = txBPSKSerial + noiseBPSK;
+
+%% Receiver
+%% Convert back to matrix form
+rxCyclic = reshape(rxSerial, N+CP, numSymbols);
+rxQPSKCyclic = reshape(rxQPSKSerial, N+CP, numSymbols);
+rxBPSKCyclic = reshape(rxBPSKSerial, N+CP, numSymbols);
+
+%% Remove cyclic prefix
+rxTime = rxCyclic(CP+1:N+CP, :);
+rxQPSKTime = rxQPSKCyclic(CP+1:N+CP, :);
+rxBPSKTime = rxBPSKCyclic(CP+1:N+CP, :);
+
+%% Perform FFT on each subcarrier
+rxData = fft(rxTime);
+rxQPSKData = fft(rxQPSKTime);
+rxBPSKData = fft(rxBPSKTime);
+
+%% Remove pilot subcarriers and flatten matrix
+rxDataFlat = rxData(P+1:end, :);
+rxDataFlat = rxDataFlat(:);
+rxQPSKDataFlat = rxQPSKData(P+1:end, :);
+rxQPSKDataFlat = rxQPSKDataFlat(:);
+rxBPSKDataFlat = rxBPSKData(P+1:end, :);
+rxBPSKDataFlat = rxBPSKDataFlat(:);
+
+%% Demodulate QAM,QPSK,BPSK symbols
+rxDataDemod = qamdemod(rxDataFlat, M);
+rxQPSKDataDemod = qamdemod(rxQPSKDataFlat, M2);
+rxBPSKDataDemod = qamdemod(rxBPSKDataFlat, M3);
+
+%% Calculate bit error rate (BER)
+[numErrors, ber] = biterr(data(:), rxDataDemod);
+[numErrorsQPSK, berQPSK] = biterr(data2(:), rxQPSKDataDemod);
+[numErrorsBPSK, berBPSK] = biterr(data3(:), rxBPSKDataDemod);
+
+%% Display BER
+disp(['BERQAM: ', num2str(ber)]);
+disp(['BERQPSK: ', num2str(berQPSK)]);
+disp(['BERBPSK: ', num2str(berBPSK)]);
+if berQPSK < berBPSK && berQPSK < ber
+    disp('BERQPSK is the lowest.');
+elseif berBPSK < berQPSK && berBPSK < ber
+    disp('BERBPSK is the lowest.');
+elseif ber < berQPSK && ber < berBPSK
+    disp('BERQAM is the lowest.');
+else
+    disp('There are multiple lowest BER values.');
+end
+%% Plot QAM signals
+% Plot transmitted signal
+figure;
+subplot(2,1,1);
+plot(real(txSerial),'r','LineWidth',2);
+hold on;
+plot(imag(txSerial),'g','LineWidth',2);
+title('Transmitted signal QAM');
+legend('Real part', 'Imaginary part');
+
+% Plot received signal
+subplot(2,1,2);
+plot(real(rxSerial),'B','LineWidth',2);
+hold on;
+plot(imag(rxSerial),'y','LineWidth',2);
+title('Received signal with AWGN QAM');
+legend('Real part', 'Imaginary part');
+%% Plot QPSK signals
+% Plot transmitted signal
+figure;
+subplot(2,1,1);
+plot(real(txQPSKSerial),'G','LineWidth',2);
+hold on;
+plot(imag(txQPSKSerial),'r','LineWidth',2);
+title('Transmitted signal QPSK');
+legend('Real part', 'Imaginary part');
+
+% Plot received signal
+subplot(2,1,2);
+plot(real(rxQPSKSerial),'B','LineWidth',2);
+hold on;
+plot(imag(rxQPSKSerial),'Y','LineWidth',2);
+title('Received signal with AWGN QPSK');
+legend('Real part', 'Imaginary part');
+
+%% Plot BPSK signals
+% Plot transmitted signal
+figure;
+subplot(2,1,1);
+plot(real(txBPSKSerial),'B','LineWidth',2);
+hold on;
+plot(imag(txBPSKSerial),'Y','LineWidth',2);
+title('Transmitted signal BPSK');
+legend('Real part', 'Imaginary part');
+
+% Plot received signal
+subplot(2,1,2);
+plot(real(rxBPSKSerial),'R','LineWidth',2);
+hold on;
+plot(imag(rxBPSKSerial),'G','LineWidth',2);
+title('Received signal with AWGN BPSK');
+legend('Real part', 'Imaginary part');
+%% Plot subcarrier magnitudes
+figure;
+plot(abs(rxData(1:N/2)),'r');
+xlabel('Subcarrier index');
+ylabel('Magnitude');
+title('OFDM Subcarrier Magnitudes');
+
+
+
+
+
+%% Implement OFDM To ASK
+
+
+%% Transmitter
+% Parameters
+
+M = 2;                          % Modulation order (2 for binary ASK)
+data_size = N * log2(M);        % Number of bits to transmit
+num_frames = 10;                % Number of frames to transmit
+SNR_dB = 20;                    % Signal-to-Noise Ratio (in dB)
+
+%% Generate random bits for transmission
+data = randi([0 1], data_size * num_frames, 1);
+
+%% Reshape bits into frames
+data_frames = reshape(data, data_size, num_frames).';
+
+%% Modulate data using ASK modulation
+symbols = (2 * qammod(data_frames, M) - 1);
+
+%% Perform IFFT
+time_signal = ifft(symbols, N, 2);
+
+%% Add cyclic prefix
+cp_length = N/4;                % Length of cyclic prefix
+time_signal_cp = [time_signal(:,(N-cp_length+1):N) time_signal];
+
+%% Generate a random Rayleigh fading channel
+%% Add AWGN
+signal_power = mean(mean(abs(time_signal_cp).^2));  % Power of transmitted signal
+noise_power = signal_power / (10^(SNRdB/10));      % Power of noise to add
+noise = sqrt(noise_power/2) * (randn(num_frames, N+cp_length) + 1i * randn(num_frames, N+cp_length));
+channel = sqrt(0.5)*(randn(num_frames, N+cp_length)+1j*randn(num_frames, N+cp_length));
+received_signal = time_signal_cp + noise + channel;
+%% Receiver
+
+%% Remove cyclic prefix
+received_signal_no_cp = received_signal(:,cp_length+1:end);
+
+%% Perform FFT
+received_signal_fft = fft(received_signal_no_cp, N, 2);
+
+%% Demodulate received signal using ASK demodulation
+received_symbols = qamdemod((received_signal_fft + 1)/2, M);
+
+%% Reshape received symbols into a column vector
+received_data = reshape(received_symbols.', [], 1);
+
+%% Calculate bit error rate
+BER = sum(abs(received_data - data))/length(data);
+disp(['BER:ASK: ', num2str(BER)]);
+%% Plots
+% Transmitted signal in time domain
+figure;
+subplot(2,1,1);
+plot(real(time_signal(1,:)),'y');
+title('Transmitted signal in time domain (1st frame)');
+xlabel('Time (samples)');
+ylabel('Amplitude');
+subplot(2,1,2);
+plot(imag(time_signal(1,:)),'r');
+title('Transmitted signal in time domain ');
+xlabel('Time (samples)');
+ylabel('Amplitude');
+
+% Transmitted signal in frequency domain
+figure;
+subplot(2,1,1);
+plot(linspace(-0.5,0.5,N),20*log10(abs(fftshift(fft(symbols(1,:), N)))),'g');
+title('Transmitted signal in frequency domain ');
+xlabel('Frequency');
+ylabel('Magnitude (dB)');
+subplot(2,1,2);
+plot(linspace(-0.5,0.5,N),angle(fftshift(fft(symbols(1,:), N))),'b');
+title('Transmitted signal in frequency domain ');
+xlabel('Frequency');
+ylabel('Phase');
+
+%% Received signal in time domain
+figure;
+subplot(2,1,1);
+plot(real(received_signal(1,:)),'B');
+title('Received signal in time domain ');
+xlabel('Time (samples)');
+ylabel('Amplitude');
+subplot(2,1,2);
+plot(imag(received_signal(1,:)));
+title('Received signal in time domain ');
+xlabel('Time (samples)');
+ylabel('Amplitude');
+figure;
+subplot(2,1,1);
+plot(linspace(-0.5,0.5,N),20*log10(abs(fftshift(fft(received_signal(1,:), N)))),'Y');
+title('Received signal in frequency domain ');
+xlabel('Frequency');
+ylabel('Magnitude (dB)');
+subplot(2,1,2);
+plot(linspace(-0.5,0.5,N),angle(fftshift(fft(received_signal(1,:), N))),'C');
+title('Received signal in frequency domain ');
+xlabel('Frequency');
+ylabel('Phase');
